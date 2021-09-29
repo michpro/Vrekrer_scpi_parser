@@ -2,7 +2,7 @@ name: Sync Fork
 
 on:
   schedule:
-    - cron: '*/30 * * * *' # every 30 minutes
+    - cron: '15 */6 * * *' # At minute 15 past every 6th hour.
   workflow_dispatch: # on button click
 
 jobs:
@@ -11,7 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: tgymnich/fork-sync@v1.4
+      - uses: tgymnich/fork-sync@v1.5.0
         with:
           base: master
           head: master
+          auto_approve: true
+          merge_method: merge
