@@ -13,6 +13,8 @@ jobs:
     steps:
       - uses: tgymnich/fork-sync@v1.5.0
         with:
+          token: ${{ secrets.PERSONAL_TOKEN }}
+          owner: michpro
           base: master
           head: master
           auto_approve: true
