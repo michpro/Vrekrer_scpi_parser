@@ -11,11 +11,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: tgymnich/fork-sync@v1.5.0
+      - uses: tgymnich/fork-sync@v1.3
         with:
           owner: Vrekrer
           token: ${{ secrets.GITHUB_TOKEN }}
+          personal_token: ${{ secrets.GH_PERSONAL_TOKEN }}
           base: master
           head: master
           auto_approve: true
-          merge_method: merge
+          merge_method: rebase
