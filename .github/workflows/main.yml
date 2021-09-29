@@ -15,8 +15,7 @@ jobs:
         with:
           owner: Vrekrer
           token: ${{ secrets.GITHUB_TOKEN }}
-          personal_token: ${{ secrets.GH_PERSONAL_TOKEN }}
           base: master
           head: master
           auto_approve: true
-          merge_method: merge
+          merge_method: rebase
