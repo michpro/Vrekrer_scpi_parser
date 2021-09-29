@@ -1,11 +1,13 @@
 #include "Vrekrer_scpi_parser.h"
 
-// SCPI_String_Array member functions
+// ## SCPI_String_Array member functions ##
 
+///Add indexing capability.
 char* SCPI_String_Array::operator[](const uint8_t index) {
   return values_[index];
 }
 
+///Append new string (LIFO stack Push).
 void SCPI_String_Array::Append(char* value) {
   if (size_ < SCPI_ARRAY_SYZE) {
     values_[size_] = value;
@@ -13,6 +15,7 @@ void SCPI_String_Array::Append(char* value) {
   }
 }
 
+///LIFO stack Pop
 char* SCPI_String_Array::Pop() {
   if (size_ > 0) {
     size_--;
@@ -22,6 +25,7 @@ char* SCPI_String_Array::Pop() {
   }
 }
 
+///Returns the first element of the array
 char* SCPI_String_Array::First() {
   if (size_ > 0) {
     return values_[0];
@@ -30,6 +34,7 @@ char* SCPI_String_Array::First() {
   }
 }
 
+///Returns the last element of the array
 char* SCPI_String_Array::Last() {
   if (size_ > 0) {
     return values_[size_ - 1];
@@ -38,20 +43,34 @@ char* SCPI_String_Array::Last() {
   }
 }
 
+///Array size
 uint8_t SCPI_String_Array::Size() {
   return size_;
 }
 
-// SCPI_Commands member functions
 
+// ## SCPI_Commands member functions ##
+
+///Dummy constructor.
+SCPI_Commands::SCPI_Commands(){}
+
+/*!
+ Constructor that extracts and tokenize a command from a message.  
+ @param message  Message to process.
+
+ The message is processed until a space, ';' or the end of the string is 
+ found, the rest is available at not_processed_message.  
+ The processed part is split on the ':' characters, the resulting parts 
+ (tokens) are stored in the array.
+*/
 SCPI_Commands::SCPI_Commands(char *message) {
   char* token = message;
   // Trim leading spaces
   while (isspace(*token)) token++;
   // Discard parameters and multicommands
-  this->not_processed_message = strpbrk(token, " \t;");
-  if (this->not_processed_message != NULL) {
-    this->not_processed_message += 1;
+  not_processed_message = strpbrk(token, " \t;");
+  if (not_processed_message != NULL) {
+    not_processed_message += 1;
     token = strtok(token, " \t;");
     token = strtok(token, ":");
   } else {
@@ -64,20 +83,34 @@ SCPI_Commands::SCPI_Commands(char *message) {
   }
 }
 
-// SCPI_Parameters member functions
 
+// ## SCPI_Parameters member functions ##
+
+/// Dummy constructor.
+SCPI_Parameters::SCPI_Parameters(){}
+
+
+/*!
+ Constructor that extracts and splits parameters from a message.  
+ @param message[in,out]  Message to process.
+
+ The message is processed until ';' or the end of the string is found, 
+ the rest is available at not_processed_message.  
+ The processed part is split on the ',' characters, the resulting parts 
+ (parameters) are stored in the array after trimming any start or end spaces.
+*/
 SCPI_Parameters::SCPI_Parameters(char* message) {
   char* parameter = message;
-  // Discard parameters and multicommands
-  this->not_processed_message = strpbrk(parameter, ";");
-  if (this->not_processed_message != NULL) {
-    this->not_processed_message += 1;
+  // Discard multicommands
+  not_processed_message = strpbrk(parameter, ";");
+  if (not_processed_message != NULL) {
+    not_processed_message += 1;
     parameter = strtok(parameter, ";");
     parameter = strtok(parameter, ",");
   } else {
     parameter = strtok(parameter, ",");
   }
-  // Strip using ':'
+  // Strip using ','
   while (parameter != NULL) {
     while(isspace(*parameter)) parameter++;
     this->Append(parameter);
@@ -86,10 +119,24 @@ SCPI_Parameters::SCPI_Parameters(char* message) {
   //TODO add support for strings parameters (do not split parameters inside "")
 }
 
+//Do nothing function
+void DefaultErrorHandler(SCPI_C c, SCPI_P p, Stream& interface) {}
 
-//SCPI_Registered_Commands member functions
 
-void SCPI_Parser::AddToken(char *token) {
+// ## SCPI_Registered_Commands member functions. ##
+
+/*!
+ SCPI_Parser constructor.
+
+ Example:  
+  ``SCPI_Parser my_instrument``;
+*/
+SCPI_Parser::SCPI_Parser(){
+  callers_[SCPI_MAX_COMMANDS] = &DefaultErrorHandler;
+}
+
+///Add a token to the tokens' storage
+void SCPI_Parser::AddToken_(char *token) {
   size_t token_size = strlen(token);
   bool isQuery = (token[token_size - 1] == '?');
   if (isQuery) token_size--;
@@ -108,143 +155,201 @@ void SCPI_Parser::AddToken(char *token) {
   }
 }
 
-uint32_t SCPI_Parser::GetCommandCode(SCPI_Commands& commands) {
-  //TODO Use a hash function instead of "base_SCPI_MAX_TOKENS numbers".
-  uint32_t code = tree_code_ - 1; // tree_code = 1 when execute
+/*!
+ Get a hash from a valid command
+ @param commands  Keywords of a command
+ @return hash
+
+ Returnn 0 if the command contains keywords not registered as tokens.  
+ The hash is calculated including the TreeBase hash.  
+ @see SetCommandTreeBase
+*/
+SCPI_HASH_TYPE SCPI_Parser::GetCommandCode_(SCPI_Commands& commands) {
+  SCPI_HASH_TYPE code;
+  if (tree_code_) {
+    code = tree_code_;
+  } else {
+    code = 7; //Magic hash offset
+  }
   bool isQuery = false;
+
+  //Loop all keywords in the command
   for (uint8_t i = 0; i < commands.Size(); i++) {
-    code *= SCPI_MAX_TOKENS;
-    size_t header_length = strlen(commands[i]);  //header's length
-    if (i == commands.Size() - 1) { //Last header
+    //Get keywords's length
+    size_t header_length = strlen(commands[i]);
+    
+    //For the last keywords test if it is a query
+    //and remove '?' from the keywords's length if needed.
+    if (i == commands.Size() - 1) {
       isQuery = (commands[i][header_length - 1] == '?');
       if (isQuery) header_length--;
     }
-    
+
     bool isToken;
     for (uint8_t j = 0; j < tokens_size_; j++) {
-      size_t short_length = 0; //short token's length
+      //Get the token's short and long lengths
+      size_t short_length = 0;
       while (isupper(tokens_[j][short_length])) short_length++;
-      size_t long_length = strlen(tokens_[j]); //long token's length
+      size_t long_length = strlen(tokens_[j]);
 
-      if ( (tokens_[j][long_length - 1] == '#') //Numeric suffix capable token
+      //If the token allows numeric suffixes
+      //remove the trailing digits from the header
+      if ( (tokens_[j][long_length - 1] == '#')
          && (commands[i][header_length - 1] != '#') ) {
         long_length--;
         while (isdigit(commands[i][header_length - 1])) header_length--;
       }
 
+      //Test if the header match with the token
       isToken = true;
-      if (header_length == short_length) { //match with short token
+      if (header_length == short_length) {
         for (uint8_t k  = 0; k < short_length; k++)
           isToken &= (toupper(commands[i][k]) == tokens_[j][k]);
-      } else if (header_length == long_length) { //match with long token
+      } else if (header_length == long_length) {
         for (uint8_t k  = 0; k < long_length; k++)
           isToken &= (toupper(commands[i][k]) == toupper(tokens_[j][k]));
       } else {
         isToken = false;
       }
+
+      //We use the token number j for hashing
+      //hash(i) = hash(i - 1) * hash_magic_number + j
       if (isToken) {
+        code *= hash_magic_number;
         code += j;
         break;
       }
     }
-    if (!isToken) return 0;
+    if (!isToken) return 255;
   }
-  if (isQuery) code ^= 0x80000000;
-  return code+1;
+  if (isQuery) {
+    code *= 37;
+    code -= 1;
+  }
+  return code;
 }
 
-void SCPI_Parser::SetCommandTreeBase(const __FlashStringHelper* tree_base) {
-  strcpy_P(msg_buffer, (const char *) tree_base);
-  this->SetCommandTreeBase(msg_buffer);
-}
-
-void SCPI_Parser::SetCommandTreeBase(const char* tree_base) {
-  strcpy(msg_buffer, tree_base);
-  this->SetCommandTreeBase(msg_buffer);
-}
-
+/*!
+ Change the TreeBase for the next RegisterCommand calls.
+ @param tree_base  TreeBase to be used.  
+        An empty string ``""`` sets the TreeBase to root.
+*/
 void SCPI_Parser::SetCommandTreeBase(char* tree_base) {
   if (strlen(tree_base) > 0) {
     SCPI_Commands tree_tokens(tree_base);
     for (uint8_t i = 0; i < tree_tokens.Size(); i++)
-      this->AddToken(tree_tokens[i]);
-    tree_code_ = 1;
-    tree_code_ = this->GetCommandCode(tree_tokens);
+      AddToken_(tree_tokens[i]);
+    tree_code_ = 0;
+    tree_code_ = this->GetCommandCode_(tree_tokens);
   } else {
-    tree_code_ = 1;
+    tree_code_ = 0;
   }
 }
 
-void SCPI_Parser::RegisterCommand(const __FlashStringHelper* command, SCPI_caller_t caller) {
-  strcpy_P(msg_buffer, (const char *) command);
-  this->RegisterCommand(msg_buffer, caller);
+/*!
+ SetCommandTreeBase version with RAM string support.
+
+ Example:  
+ ``my_instrument.SetCommandTreeBase("SYSTem:LED");``  
+ For lower RAM usage use the Flash strings version.
+*/
+void SCPI_Parser::SetCommandTreeBase(const char* tree_base) {
+  strcpy(msg_buffer_, tree_base);
+  this->SetCommandTreeBase(msg_buffer_);
 }
 
-void SCPI_Parser::RegisterCommand(const char* command, SCPI_caller_t caller) {
-  strcpy(msg_buffer, command);
-  this->RegisterCommand(msg_buffer, caller);
+/*!
+ SetCommandTreeBase version with Flash strings (F() macro) support.
+
+ Example:  
+  ``my_instrument.SetCommandTreeBase(F("SYSTem:LED"));``
+*/
+void SCPI_Parser::SetCommandTreeBase(const __FlashStringHelper* tree_base) {
+  strcpy_P(msg_buffer_, (const char *) tree_base);
+  this->SetCommandTreeBase(msg_buffer_);
 }
 
+/*!
+ Registers a new valid command and associate a procedure to it.
+ @param command  New valid command.
+ @param caller  Procedure associated to the valid command.
+*/
 void SCPI_Parser::RegisterCommand(char* command, SCPI_caller_t caller) {
   SCPI_Commands command_tokens(command);
   for (uint8_t i = 0; i < command_tokens.Size(); i++)
-    this->AddToken(command_tokens[i]);
-  uint32_t code = this->GetCommandCode(command_tokens);
+    this->AddToken_(command_tokens[i]);
+  SCPI_HASH_TYPE code = this->GetCommandCode_(command_tokens);
   valid_codes_[codes_size_] = code;
   callers_[codes_size_] = caller;
   codes_size_++;
 }
 
+/*!
+ RegisterCommand version with RAM string support.
+
+ Example:  
+  ``my_instrument.RegisterCommand("*IDN?", &Identify);``  
+ For lower RAM usage use the Flash strings version.
+*/
+void SCPI_Parser::RegisterCommand(const char* command, SCPI_caller_t caller) {
+  strcpy(msg_buffer_, command);
+  this->RegisterCommand(msg_buffer_, caller);
+}
+
+/*!
+ RegisterCommand version with Flash strings (F() macro) support.
+
+ Example:  
+  ``my_instrument.RegisterCommand(F("*IDN?"), &Identify);``
+*/
+void SCPI_Parser::RegisterCommand(const __FlashStringHelper* command, SCPI_caller_t caller) {
+  strcpy_P(msg_buffer_, (const char *) command);
+  this->RegisterCommand(msg_buffer_, caller);
+}
+
+/*!
+ Set the function to be used by the error handler.
+
+ Example:  
+  ``my_instrument.SetErrorHandler(&myErrorHandler);``
+*/
+void SCPI_Parser::SetErrorHandler(SCPI_caller_t caller){
+  callers_[SCPI_MAX_COMMANDS] = caller;
+}
+
+
+/*!
+ Process a message and execute it a valid command is found.
+ @param message  Message to be processed.
+ @param interface  The source of the message.
+ 
+ Commands and parameters are extracted from the message,  
+ if a valid command is found, its associated procedure is executed.  
+ The command' tokens and parameters, and the interface is passed
+ to the executed procedure.  
+ @see GetMessage
+*/
 void SCPI_Parser::Execute(char* message, Stream &interface) {
-  tree_code_ = 1;
+  tree_code_ = 0;
   SCPI_Commands commands(message);
   SCPI_Parameters parameters(commands.not_processed_message);
-  uint32_t code = this->GetCommandCode(commands);
+  SCPI_HASH_TYPE code = this->GetCommandCode_(commands);
   for (uint8_t i = 0; i < codes_size_; i++)
-    if (valid_codes_[i] == code)
+    if (valid_codes_[i] == code) {
       (*callers_[i])(commands, parameters, interface);
-}
-
-char* SCPI_Parser::GetMessage(Stream& interface, const char* term_chars) {
-  uint8_t msg_counter = 0;
-  this->msg_buffer[msg_counter] = '\0';
-  this->buffer_overflow = false;
-  this->timeout = false;
-
-  bool continous_data = false;
-  unsigned long last_data_millis = millis();
-  do {
-    if (interface.available()) {
-      continous_data = true;
-      last_data_millis = millis();
-      this->msg_buffer[msg_counter] = interface.read();
-
-      ++msg_counter;
-      if (msg_counter >= SCPI_BUFFER_LENGTH){
-          msg_counter = 0;
-          this->buffer_overflow = true;
-      }
-      msg_buffer[msg_counter] = '\0';
-
-      if (strstr(msg_buffer, term_chars) != NULL) {
-        this->msg_buffer[msg_counter - strlen(term_chars)] =  '\0';
-        break;
-      }
-    } else { //No chars aviable jet
-      if ((millis() - last_data_millis) > SCPI_TIMEOUT) {
-        this->timeout = true;
-        continous_data = false;
-      }
+      return;
     }
-  } while (continous_data);
-  if (buffer_overflow)
-    return NULL;
-  else if (continous_data)
-    return this->msg_buffer;
-  else
-    return NULL;
+  //code not found in valid_codes_
+  //Call ErrorHandler UnknownCommand
+  last_error = ErrorCode::UnknownCommand;
+  (*callers_[SCPI_MAX_COMMANDS])(commands, parameters, interface);
 }
 
+/*!
+ Gets a message from a Stream interface and execute it.
+ @see GetMessage
+ @see Execute
+*/
 void SCPI_Parser::ProcessInput(Stream& interface, const char* term_chars) {
   char* message = this->GetMessage(interface, term_chars);
   if (message != NULL) {
@@ -252,6 +357,62 @@ void SCPI_Parser::ProcessInput(Stream& interface, const char* term_chars) {
   }
 }
 
+/*!
+ Gets a message from a Stream interface.
+ @param interface  A Stream interface like Serial or Ethernet.
+ @param term_chars  Termination chars e.g. ``"\r\n"``.
+ @return the read message if the ``term_chars`` are found, otherwise ``NULL``.
+
+ Reads the available chars in the interface, if the term_chars are found
+ the message is returned, otherwise the return is ``NULL``.  
+ Subsequent calls to this function continues the message reading.  
+ The message is discarded, and the error handler is called if:  
+  A timeout occurs (10 ms without new chars)  
+  The message buffer overflows
+*/
+char* SCPI_Parser::GetMessage(Stream& interface, const char* term_chars) {
+  while (interface.available()) {
+    //Read the new char
+    msg_buffer_[message_length_] = interface.read();
+    ++message_length_;
+    time_checker_ = millis();
+
+    if (message_length_ >= SCPI_BUFFER_LENGTH){
+      //Call ErrorHandler due BufferOverflow
+      last_error = ErrorCode::BufferOverflow;
+      (*callers_[SCPI_MAX_COMMANDS])(SCPI_C(), SCPI_P(), interface);
+      message_length_ = 0;
+      return NULL;
+    }
+
+    //Test for termination chars (end of the message)
+    msg_buffer_[message_length_] = '\0';
+    if (strstr(msg_buffer_, term_chars) != NULL) {
+      //Return the received message
+      msg_buffer_[message_length_ - strlen(term_chars)] =  '\0';
+      message_length_ = 0;
+      return msg_buffer_;
+    }
+  }
+  //No more chars aviable yet
+
+  //Return NULL if no message is incomming
+  if (message_length_ == 0) return NULL;
+
+  //Check for communication timeout
+  if ((millis() - time_checker_) > SCPI_TIMEOUT) {
+      //Call ErrorHandler due Timeout
+      last_error = ErrorCode::Timeout;
+      (*callers_[SCPI_MAX_COMMANDS])(SCPI_C(), SCPI_P(), interface);
+      message_length_ = 0;
+      return NULL;
+  }
+
+  //No errors, be sure to return NULL
+  return NULL;
+}
+
+///Prints registered tokens and command hashes to the serial interface
 void SCPI_Parser::PrintDebugInfo() {
   Serial.println(F("*** DEBUG INFO ***"));
   Serial.println();
