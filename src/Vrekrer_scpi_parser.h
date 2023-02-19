@@ -6,6 +6,8 @@ Header file.
 #ifndef VREKRER_SCPI_PARSER_H_
 #define VREKRER_SCPI_PARSER_H_
 
+#define VREKRER_SCPI_VERSION "v0.4.3"
+
 
 /// Max branch size of the command tree and max number of parameters.
 #ifndef SCPI_ARRAY_SYZE
@@ -20,6 +22,16 @@ Header file.
 /// Max number of registered commands.
 #ifndef SCPI_MAX_COMMANDS
   #define SCPI_MAX_COMMANDS 20
+#endif
+
+/// Max number of registered special commands.
+#ifndef SCPI_MAX_SPECIAL_COMMANDS
+  #define SCPI_MAX_SPECIAL_COMMANDS 0
+#endif
+
+/// Length of the message buffer.
+#ifndef SCPI_BUFFER_LENGTH
+  #define SCPI_BUFFER_LENGTH 64
 #endif
 
 /// Integer size used for hashes.
@@ -50,8 +62,9 @@ class SCPI_String_Array {
   char* First();                       //Returns the first element of the array
   char* Last();                        //Returns the last element of the array
   uint8_t Size();                      //Array size
- protected:
+  bool overflow_error = false;         //Storage overflow error
   const uint8_t storage_size = SCPI_ARRAY_SYZE; //Max size of the array 
+ protected:
   uint8_t size_ = 0;              //Internal array size
   char* values_[SCPI_ARRAY_SYZE]; //Storage of the strings
 };
@@ -85,33 +98,18 @@ class SCPI_Parameters : public SCPI_String_Array {
 };
 
 ///Alias of SCPI_Commands.
-typedef SCPI_Commands SCPI_C;
+using SCPI_C = SCPI_Commands;
 
 ///Alias of SCPI_Parameters.
-typedef SCPI_Parameters SCPI_P;
+using SCPI_P = SCPI_Parameters;
 
 ///Void template used with SCPI_Parser::RegisterCommand.
-typedef void (*SCPI_caller_t)(SCPI_Commands, SCPI_Parameters, Stream&);
+using SCPI_caller_t = void(*)(SCPI_Commands, SCPI_Parameters, Stream&); 
+///Void template used with SCPI_Parser::RegisterSpecialCommand.
+using SCPI_special_caller_t = void(*)(SCPI_Commands, Stream&);
 
 /// Integer size used for hashes.
-typedef SCPI_HASH_TYPE scpi_hash_t;
-
-class SCPI_Default_Config {
-  public:
-    char message_buffer[64];
-};
-
-class SCPI_Message_Buffer_ABC{
-  public:
-    size_t size;
-    char data[0];
-};
-template<int buffer_length>
-class SCPI_Message_Buffer : public SCPI_Message_Buffer_ABC{
-  public:
-    size_t size = buffer_length;
-    char data[buffer_length];
-};
+using scpi_hash_t = SCPI_HASH_TYPE;
 
 /*!
   Main class of the Vrekrer_SCPI_Parser library.
@@ -120,8 +118,6 @@ class SCPI_Parser {
  public:
   //Constructor
   SCPI_Parser();
-  //Advanced constructor 
-  SCPI_Parser(SCPI_Message_Buffer_ABC message_buffer);
   //Change the TreeBase for the next RegisterCommand calls
   void SetCommandTreeBase(char* tree_base);
   //SetCommandTreeBase version with RAM string support
@@ -133,7 +129,8 @@ class SCPI_Parser {
   //RegisterCommand version with RAM string support.
   void RegisterCommand(const char* command, SCPI_caller_t caller);
   //RegisterCommand version with Flash strings (F() macro) support
-  void RegisterCommand(const __FlashStringHelper* command, SCPI_caller_t caller);
+  void RegisterCommand(const __FlashStringHelper* command,
+                       SCPI_caller_t caller);
   //Set the function to be used by the error handler.
   void SetErrorHandler(SCPI_caller_t caller);
   ///SCPI Error codes.
@@ -152,19 +149,46 @@ class SCPI_Parser {
   //Process a message and execute it a valid command is found
   void Execute(char* message, Stream& interface);
   //Gets a message from a Stream interface and execute it
-  void ProcessInput(Stream &interface, const char* term_chars);
+  void ProcessInput(Stream& interface, const char* term_chars);
   //Gets a message from a Stream interface
   char* GetMessage(Stream& interface, const char* term_chars);
   //Prints registered tokens and command hashes to the serial interface
-  void PrintDebugInfo();
+  void PrintDebugInfo(Stream& interface);
   ///Magic number used for hashing the commands
   scpi_hash_t hash_magic_number = 37;
+  ///Magic offset used for hashing the commands
+  scpi_hash_t hash_magic_offset = 7;
   
+  #if SCPI_MAX_SPECIAL_COMMANDS
+  //Registers a new valid special command and associate a procedure to it
+  void RegisterSpecialCommand(char* command, SCPI_special_caller_t caller);
+  //RegisterSpecialCommand version with RAM string support.
+  void RegisterSpecialCommand(const char* command, 
+                              SCPI_special_caller_t caller);
+  //RegisterSpecialCommand version with Flash strings (F() macro) support
+  void RegisterSpecialCommand(const __FlashStringHelper* command, 
+                              SCPI_special_caller_t caller);
+  #endif
+
  protected:
+  //Length of the message buffer.
+  const uint8_t buffer_length = SCPI_BUFFER_LENGTH;
   //Max number of valid tokens.
   const uint8_t max_tokens = SCPI_MAX_TOKENS;
   //Max number of registered commands.
   const uint8_t max_commands = SCPI_MAX_COMMANDS;
+  //Command storage overflow error
+  bool command_overflow_error = false;
+  //Token storage overflow error
+  bool token_overflow_error = false;
+  //Branch (SCPI_Commands) storage overflow error
+  bool branch_overflow_error = false;
+  //Special command storage overflow error
+  bool special_command_overflow_error = false;
+  //Hash result for unknown commands
+  const scpi_hash_t unknown_hash = 0;
+  //Hash reserved for invalid commands
+  const scpi_hash_t invalid_hash = 1;
 
   //Add a token to the tokens' storage
   void AddToken_(char* token);
@@ -180,21 +204,34 @@ class SCPI_Parser {
   scpi_hash_t valid_codes_[SCPI_MAX_COMMANDS];
   //Pointers to the functions to be called when a valid command is received
   SCPI_caller_t callers_[SCPI_MAX_COMMANDS+1];
-  //Branch's hash used when calculating unique codes (0 for root)
+  //TreeBase branch's hash used when calculating hashes (0 for root)
   scpi_hash_t tree_code_ = 0;
-
+  //TreeBase branch's length (0 for root)
+  uint8_t tree_length_ = 0;
+  //Message buffer.
+  char msg_buffer_[SCPI_BUFFER_LENGTH];
   //Length of the readed message
   uint8_t message_length_ = 0;
-
-  //Length of the message buffer.
-  uint8_t buffer_length;
-  //Message buffer.
-  char *msg_buffer_;
-
   //Timeout, in miliseconds, for GetMessage and ProcessInput.
   unsigned long timeout = 10;
   //Varible used for checking timeout errors
   unsigned long time_checker_;
+
+  #if SCPI_MAX_SPECIAL_COMMANDS
+  //Max number of registered special commands.
+  const uint8_t max_special_commands = SCPI_MAX_SPECIAL_COMMANDS;
+  //Number of registered special commands
+  uint8_t special_codes_size_ = 0;
+  //Registered special commands' hash storage
+  scpi_hash_t valid_special_codes_[SCPI_MAX_SPECIAL_COMMANDS];
+  //Pointers to the functions to be called when a special command is received
+  SCPI_special_caller_t special_callers_[SCPI_MAX_SPECIAL_COMMANDS];
+  #endif
 };
+
+// Include the implementation code here
+// This allows Arduino IDE users to configure options with #define directives 
+#include "Vrekrer_scpi_parser_code.h"
+#include "Vrekrer_scpi_parser_special_code.h"
 
 #endif //VREKRER_SCPI_PARSER_H_
