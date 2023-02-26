@@ -6,7 +6,7 @@ Header file.
 #ifndef VREKRER_SCPI_PARSER_H_
 #define VREKRER_SCPI_PARSER_H_
 
-#define VREKRER_SCPI_VERSION "v0.4.3"
+#define VREKRER_SCPI_VERSION "v0.5.0"
 
 
 /// Max branch size of the command tree and max number of parameters.
@@ -158,6 +158,8 @@ class SCPI_Parser {
   scpi_hash_t hash_magic_number = 37;
   ///Magic offset used for hashing the commands
   scpi_hash_t hash_magic_offset = 7;
+  //Timeout, in miliseconds, for GetMessage and ProcessInput.
+  unsigned long timeout = 10;
   
   #if SCPI_MAX_SPECIAL_COMMANDS
   //Registers a new valid special command and associate a procedure to it
@@ -177,14 +179,17 @@ class SCPI_Parser {
   const uint8_t max_tokens = SCPI_MAX_TOKENS;
   //Max number of registered commands.
   const uint8_t max_commands = SCPI_MAX_COMMANDS;
-  //Command storage overflow error
-  bool command_overflow_error = false;
-  //Token storage overflow error
-  bool token_overflow_error = false;
-  //Branch (SCPI_Commands) storage overflow error
-  bool branch_overflow_error = false;
-  //Special command storage overflow error
-  bool special_command_overflow_error = false;
+  //Internal errors container
+  struct internal_errors {
+    //Command storage overflow error
+    bool command_overflow = false;
+    //Token storage overflow error
+    bool token_overflow = false;
+    //Branch (SCPI_Commands) storage overflow error
+    bool branch_overflow = false;
+    //Special command storage overflow error
+    bool special_command_overflow = false;
+  } setup_errors;
   //Hash result for unknown commands
   const scpi_hash_t unknown_hash = 0;
   //Hash reserved for invalid commands
@@ -212,8 +217,6 @@ class SCPI_Parser {
   char msg_buffer_[SCPI_BUFFER_LENGTH];
   //Length of the readed message
   uint8_t message_length_ = 0;
-  //Timeout, in miliseconds, for GetMessage and ProcessInput.
-  unsigned long timeout = 10;
   //Varible used for checking timeout errors
   unsigned long time_checker_;
 
@@ -231,6 +234,7 @@ class SCPI_Parser {
 
 // Include the implementation code here
 // This allows Arduino IDE users to configure options with #define directives 
+#include "Vrekrer_scpi_arrays_code.h"
 #include "Vrekrer_scpi_parser_code.h"
 #include "Vrekrer_scpi_parser_special_code.h"
 

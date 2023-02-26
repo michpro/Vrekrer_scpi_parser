@@ -2,104 +2,6 @@
 // This allows Arduino IDE users to configure options with #define directives 
 // Do not include Vrekrer_scpi_parser.h here.
 
-// ## SCPI_String_Array member functions ##
-
-///Add indexing capability.
-char* SCPI_String_Array::operator[](const uint8_t index) {
-  if (index >= size_) return NULL; //Invalid index
-  return values_[index];
-}
-
-///Append new string (LIFO stack Push).
-void SCPI_String_Array::Append(char* value) {
-  overflow_error = (size_ >= storage_size);
-  if (overflow_error) return;
-  values_[size_] = value;
-  size_++;
-}
-
-///LIFO stack Pop
-char* SCPI_String_Array::Pop() {
-  if (size_ == 0) return NULL; //Empty array
-  size_--;
-  return values_[size_];
-}
-
-///Returns the first element of the array
-char* SCPI_String_Array::First() {
-  if (size_ == 0) return NULL; //Empty array
-  return values_[0];
-}
-
-///Returns the last element of the array
-char* SCPI_String_Array::Last() {
-  if (size_ == 0) return NULL; //Empty array
-  return values_[size_ - 1];
-}
-
-///Array size
-uint8_t SCPI_String_Array::Size() {
-  return size_;
-}
-
-
-// ## SCPI_Commands member functions ##
-
-///Dummy constructor.
-SCPI_Commands::SCPI_Commands(){}
-
-/*!
- Constructor that extracts and tokenize a command from a message.  
- @param message  Message to process.
-
- The message is processed until a space, tab or the end of the string is 
- found, the rest is available at not_processed_message.  
- The processed part is split on the ':' characters, the resulting parts 
- (tokens) are stored in the array.
-*/
-SCPI_Commands::SCPI_Commands(char* message) {
-  char* token = message;
-  // Trim leading spaces and tabs
-  while (isspace(*token)) token++;
-  // Save parameters and multicommands for later
-  not_processed_message = strpbrk(token, " \t");
-  if (not_processed_message != NULL) {
-   not_processed_message[0] = '\0';
-   not_processed_message++;
-  }
-  // Split using ':'
-  token = strtok(token, ":");
-  while (token != NULL) {
-    this->Append(token);
-    token = strtok(NULL, ":");
-  }
-}
-
-
-// ## SCPI_Parameters member functions ##
-
-/// Dummy constructor.
-SCPI_Parameters::SCPI_Parameters(){}
-
-
-/*!
- Constructor that extracts and splits parameters from a message.  
- @param message[in,out]  Message to process.
-
- The message is split on the ',' characters, the resulting parts 
- (parameters) are stored in the array after trimming any start spaces.
-*/
-SCPI_Parameters::SCPI_Parameters(char* message) {
-  char* parameter = message;
-  // Split using ','
-  parameter = strtok(parameter, ",");
-  while (parameter != NULL) {
-    while(isspace(*parameter)) parameter++;
-    this->Append(parameter);
-    parameter = strtok(NULL, ",");
-  }
-  //TODO add support for strings parameters (do not split parameters inside "")
-}
 
 //Do nothing function
 void DefaultErrorHandler(SCPI_C c, SCPI_P p, Stream& interface) {}
@@ -120,7 +22,7 @@ SCPI_Parser::SCPI_Parser(){
 ///Add a token to the tokens' storage
 void SCPI_Parser::AddToken_(char *token) {
   if (tokens_size_ >= max_tokens) {
-    token_overflow_error = true;
+    setup_errors.token_overflow = true;
     return;
   }
   size_t token_size = strlen(token);
@@ -128,7 +30,8 @@ void SCPI_Parser::AddToken_(char *token) {
   if (token[token_size - 1] == '?') token_size--;
   for (uint8_t i = 0; i < tokens_size_; i++)
     //Check if the token is allready added
-    if (strncmp(token, tokens_[i], token_size) == 0) return;
+    if ( (strncmp(token, tokens_[i], token_size) == 0) 
+          and (token_size == strlen(tokens_[i])) ) return;
   char *stored_token = new char [token_size + 1];
   strncpy(stored_token, token, token_size);
   stored_token[token_size] = '\0';
@@ -228,7 +131,7 @@ void SCPI_Parser::SetCommandTreeBase(char* tree_base) {
   tree_code_ = this->GetCommandCode_(tree_tokens);
   tree_length_ = tree_tokens.Size();
   if (tree_tokens.overflow_error) {
-    branch_overflow_error = true;
+    setup_errors.branch_overflow = true;
     tree_code_ = invalid_hash;
   } 
 }
@@ -263,7 +166,7 @@ void SCPI_Parser::SetCommandTreeBase(const __FlashStringHelper* tree_base) {
 */
 void SCPI_Parser::RegisterCommand(char* command, SCPI_caller_t caller) {
   if (codes_size_ >= max_commands) {
-    command_overflow_error = true;
+    setup_errors.command_overflow = true;
     return;
   }
   SCPI_Commands command_tokens(command);
@@ -276,7 +179,7 @@ void SCPI_Parser::RegisterCommand(char* command, SCPI_caller_t caller) {
   bool overflow_error = command_tokens.overflow_error;
   overflow_error |= (tree_length_+command_tokens.Size()) 
                     > command_tokens.storage_size;
-  branch_overflow_error |= overflow_error;
+  setup_errors.command_overflow |= overflow_error;
   if (overflow_error) code = invalid_hash;
 
   valid_codes_[codes_size_] = code;
@@ -447,14 +350,14 @@ char* SCPI_Parser::GetMessage(Stream& interface, const char* term_chars) {
   return NULL;
 }
 
-///Prints registered tokens and command hashes to the serial interface
+///Prints debug information to an interface.
 void SCPI_Parser::PrintDebugInfo(Stream& interface) 
 {
   interface.println(F("*** DEBUG INFO ***\n"));
   interface.print(F("Max command tree branches: "));
   interface.print(SCPI_ARRAY_SYZE);
   interface.println(F(" (SCPI_ARRAY_SYZE)"));
-  if (branch_overflow_error) 
+  if (setup_errors.branch_overflow) 
     interface.println(F(" **ERROR** Max branch size exceeded."));
   interface.print(F("Max number of parameters: "));
   interface.print(SCPI_ARRAY_SYZE);
@@ -468,7 +371,7 @@ void SCPI_Parser::PrintDebugInfo(Stream& interface)
   interface.print(F(" / "));
   interface.print(max_tokens);
   interface.println(F(" (SCPI_MAX_TOKENS)"));
-  if (token_overflow_error) 
+  if (setup_errors.token_overflow) 
     interface.println(F(" **ERROR** Max tokens exceeded."));
   for (uint8_t i = 0; i < tokens_size_; i++) {
     interface.print(F("  "));
@@ -487,7 +390,7 @@ void SCPI_Parser::PrintDebugInfo(Stream& interface)
   interface.print(F(" / "));
   interface.print(max_commands);
   interface.println(F(" (SCPI_MAX_COMMANDS)"));
-  if (command_overflow_error) 
+  if (setup_errors.command_overflow) 
     interface.println(F(" **ERROR** Max commands exceeded."));
   interface.println(F("  #\tHash\t\tHandler"));
   for (uint8_t i = 0; i < codes_size_; i++) {
@@ -498,19 +401,16 @@ void SCPI_Parser::PrintDebugInfo(Stream& interface)
     if (valid_codes_[i] == unknown_hash) {
       interface.print(F("!*"));
       unknown_error = true;
-      continue;
     } else if (valid_codes_[i] == invalid_hash) {
       interface.print(F("!%"));
       invalid_error = true;
-      continue;
-    }
-    for (uint8_t j = 0; j < i; j++) {
-      if (valid_codes_[i] == valid_codes_[j]) {
-        interface.print("!!");
-        hash_crash = true;
-        break;
-      }
-    }
+    } else 
+      for (uint8_t j = 0; j < i; j++) 
+        if (valid_codes_[i] == valid_codes_[j]) {
+          interface.print("!!");
+          hash_crash = true;
+          break;
+        }
     interface.print(F("\t\t0x"));
     interface.print(long(callers_[i]), HEX);
     interface.println();
@@ -523,6 +423,49 @@ void SCPI_Parser::PrintDebugInfo(Stream& interface)
   if (hash_crash) 
     interface.println(F(" **ERROR** Hash crashes found. (!!)"));
 
+  #if SCPI_MAX_SPECIAL_COMMANDS
+  hash_crash = false;
+  unknown_error = false;
+  invalid_error = false;
+  interface.println();
+  interface.print(F("VALID SPECIAL CODES : "));
+  interface.print(special_codes_size_);
+  interface.print(F(" / "));
+  interface.print(max_special_commands);
+  interface.println(F(" (SCPI_MAX_SPECIAL_COMMANDS)"));
+  if (setup_errors.special_command_overflow) 
+    interface.println(F(" **ERROR** Max special commands exceeded."));
+  interface.println(F("  #\tHash\t\tHandler"));
+  for (uint8_t i = 0; i < special_codes_size_; i++) {
+    interface.print(F("  "));
+    interface.print(i+1);
+    interface.print(F(":\t"));
+    interface.print(valid_special_codes_[i], HEX);
+    if (valid_special_codes_[i] == unknown_hash) {
+      interface.print(F("!*"));
+      unknown_error = true;
+    } else if (valid_special_codes_[i] == invalid_hash) {
+      interface.print(F("!%"));
+      invalid_error = true;
+    } else
+      for (uint8_t j = 0; j < i; j++)
+        if (valid_special_codes_[i] == valid_special_codes_[j]) {
+          interface.print("!!");
+          hash_crash = true;
+          break;
+        }
+    interface.print(F("\t\t0x"));
+    interface.print(long(special_callers_[i]), HEX);
+    interface.println();
+    interface.flush();
+  }
+  if (unknown_error) 
+    interface.println(F(" **ERROR** Tried to register ukwnonk tokens. (!*)"));
+  if (invalid_error) 
+    interface.println(F(" **ERROR** Tried to register invalid commands. (!%)"));
+  if (hash_crash) 
+    interface.println(F(" **ERROR** Hash crashes found. (!!)"));
+  #endif
   
   interface.println(F("\nHASH Configuration:"));
   interface.print(F("  Hash size: "));
@@ -530,6 +473,7 @@ void SCPI_Parser::PrintDebugInfo(Stream& interface)
   interface.println(F("bits (SCPI_HASH_TYPE)"));
   interface.print(F("  Hash magic number: "));
   interface.println(hash_magic_number);
-
+  interface.print(F("  Hash magic offset: "));
+  interface.println(hash_magic_offset);
   interface.println(F("\n*******************\n"));
 }
