@@ -56,12 +56,12 @@ Header file.
 */
 class SCPI_String_Array {
  public:
-  char* operator[](const byte index);  //Add indexing capability
+  char* operator[](const byte index) const;  //Add indexing capability
   void Append(char* value);            //Append new string (LIFO stack Push)
   char* Pop();                         //LIFO stack Pop
-  char* First();                       //Returns the first element of the array
-  char* Last();                        //Returns the last element of the array
-  uint8_t Size();                      //Array size
+  char* First() const;                       //Returns the first element of the array
+  char* Last() const;                        //Returns the last element of the array
+  uint8_t Size() const;                      //Array size
   bool overflow_error = false;         //Storage overflow error
   const uint8_t storage_size = SCPI_ARRAY_SYZE; //Max size of the array 
  protected:
@@ -104,7 +104,7 @@ using SCPI_C = SCPI_Commands;
 using SCPI_P = SCPI_Parameters;
 
 ///Void template used with SCPI_Parser::RegisterCommand.
-using SCPI_caller_t = void(*)(SCPI_Commands, SCPI_Parameters, Stream&); 
+using SCPI_caller_t = void(*)(SCPI_Commands, SCPI_Parameters, Stream&);
 ///Void template used with SCPI_Parser::RegisterSpecialCommand.
 using SCPI_special_caller_t = void(*)(SCPI_Commands, Stream&);
 
@@ -234,8 +234,21 @@ class SCPI_Parser {
 
 // Include the implementation code here
 // This allows Arduino IDE users to configure options with #define directives 
+//
+// Important!!! Implement the library only once in the main.ino file. If you are
+// including the same file in other *.cpp files, write this instead:
+//
+// #define VREKRER_SCPI_PARSER_NO_IMPL
+// #include "Vrekrer_scpi_parser.h"
+//
+// Otherwise, the Arduino linker script will return this error:
+//
+// (.text+0x0): multiple definition of `SCPI_Parser::ProcessInput(Stream&, char const*)'
+
+#ifdef VREKRER_SCPI_PARSER_NO_IMPL
 #include "Vrekrer_scpi_arrays_code.h"
 #include "Vrekrer_scpi_parser_code.h"
 #include "Vrekrer_scpi_parser_special_code.h"
+#endif
 
 #endif //VREKRER_SCPI_PARSER_H_
